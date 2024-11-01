@@ -1,6 +1,3 @@
---DROP DATABASE IF EXISTS projetoDW;
---CREATE DATABASE projetoDW;
---USE projetoDW;
 CREATE TABLE tb001_categorias (
     tb001_cod_categoria INT PRIMARY KEY,
     tb001_descricao VARCHAR(255) NOT NULL

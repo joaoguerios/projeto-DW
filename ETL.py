@@ -186,7 +186,6 @@ FROM ADS.dbo.tb010_012_vendas v
 JOIN ADS.dbo.tb005_funcionarios f ON v.tb005_matricula = f.tb005_matricula
 """
 
-
 insert_vendas = """
 INSERT INTO public.tb011_vendas (
     tb011_quantidade,
