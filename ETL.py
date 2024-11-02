@@ -39,7 +39,7 @@ cursor_sql = sql_conn.cursor()
 # Conexão com PostgreSQL
 pg_conn = psycopg2.connect(
     host="localhost",
-    database="Dw",
+    database="projetoDw",
     user="postgres",
     password="#"
 )
@@ -172,7 +172,7 @@ def process_funcionario_row(row):
 transfer_data(cursor_sql, cursor_pg, select_funcionarios,
               insert_funcionarios, process_funcionario_row)
 
-# ETL para tb011_vendas
+#inserindo na fato vendas
 select_vendas = """
 SELECT
     v.tb010_012_quantidade,
@@ -199,7 +199,6 @@ INSERT INTO public.tb011_vendas (
 VALUES (%s, %s, %s, %s, %s, %s, %s)
 """
 
-
 def process_venda_row(row):
     quantidade = row[0]
     valor = row[1]
@@ -209,16 +208,190 @@ def process_venda_row(row):
     cpf_cliente = row[5]
     cod_funcionario = row[6]
 
-    # Gerar o código de tempo (tb007_tempo_cod) a partir da data_venda
     if isinstance(data_venda, datetime):
         data_venda = data_venda.date()
-    tempo_cod = int(data_venda.strftime('%Y%m%d'))  # Formato YYYYMMDD
+    tempo_cod_venda = int(data_venda.strftime('%Y%m%d'))  # Formato YYYYMMDD
 
-    return (quantidade, valor, cod_produto, cod_filial, tempo_cod, cpf_cliente, cod_funcionario)
-
+    return (quantidade, valor, cod_produto, cod_filial, tempo_cod_venda,cpf_cliente,cod_funcionario)
 
 transfer_data(cursor_sql, cursor_pg, select_vendas,
               insert_vendas, process_venda_row)
+
+# ETL para tb011_vendas -> 1. Valor das vendas agrupada por produto, tipo e categoria.
+select_vendas_agrupadas = """
+SELECT
+    p.tb003_cod_tipo AS tipo_id, 
+    p.tb003_cod_categoria AS categoria_id,
+    SUM(v.tb011_quantidade) AS total_quantidade,
+    SUM(v.tb011_valor) AS total_valor
+FROM public.tb011_vendas v
+JOIN public.tb003_produtos p ON v.tb011_cod_produto = p.tb003_cod_produto
+GROUP BY p.tb003_cod_tipo, p.tb003_cod_categoria
+"""
+
+insert_vendas_agrupadas = """
+INSERT INTO public.tb011_vendas (
+    tb011_quantidade,
+    tb011_valor,
+    tb011_cod_produto,
+    tb011_cod_filial,
+    tb011_cod_tempo,
+    tb011_cod_cliente,
+    tb011_cod_funcionario
+)
+VALUES (%s, %s, NULL, NULL, NULL, NULL, NULL)  
+"""
+
+def process_vendas_agrupadas(row):
+    tipo_id = row[0]  
+    categoria_id = row[1]  
+    total_quantidade = row[2]
+    total_valor = row[3]
+
+    return (total_quantidade, total_valor) 
+
+
+transfer_data(cursor_pg, cursor_pg, select_vendas_agrupadas,
+              insert_vendas_agrupadas, process_vendas_agrupadas)
+
+
+
+#ETL para tb011_vendas -> 2. Clientes que mais compraram na loja virtual com valor acumulado por período.
+select_clientes_mais_compraram = """
+SELECT
+    v.tb011_cod_cliente,  -- Ajustar para a coluna correta
+    SUM(v.tb011_valor) AS total_valor
+FROM public.tb011_vendas v
+GROUP BY v.tb011_cod_cliente
+ORDER BY total_valor DESC
+"""
+
+insert_clientes_mais_compraram = """
+INSERT INTO public.tb011_vendas (
+    tb011_quantidade,
+    tb011_valor,
+    tb011_cod_produto,
+    tb011_cod_filial,
+    tb011_cod_tempo,
+    tb011_cod_cliente,
+    tb011_cod_funcionario
+)
+VALUES (0, %s, NULL, NULL, NULL, %s, NULL)  -- Altere NULL para 0 para tb011_quantidade
+"""
+
+def process_clientes_mais_compraram(row):
+    total_valor = row[1]
+    cpf_cliente = row[0]
+
+    return (total_valor, cpf_cliente)
+
+transfer_data(cursor_pg, cursor_pg, select_clientes_mais_compraram,
+              insert_clientes_mais_compraram, process_clientes_mais_compraram)
+
+
+# ETL para tb011_vendas -> 3. Volume das vendas por funcionário e localidade.
+select_volume_vendas_funcionario = """
+SELECT
+    f.tb010_cod_funcionario,
+    v.tb011_cod_filial, 
+    SUM(v.tb011_quantidade) AS total_quantidade,
+    SUM(v.tb011_valor) AS total_valor
+FROM public.tb011_vendas v
+JOIN public.tb010_funcionario f ON v.tb011_cod_funcionario = f.tb010_cod_funcionario
+GROUP BY f.tb010_cod_funcionario, v.tb011_cod_filial
+"""
+
+insert_volume_vendas_funcionario = """
+INSERT INTO public.tb011_vendas (
+    tb011_quantidade,
+    tb011_valor,
+    tb011_cod_produto,
+    tb011_cod_filial,
+    tb011_cod_tempo,
+    tb011_cod_cliente,
+    tb011_cod_funcionario
+)
+VALUES (%s, %s, NULL, NULL, NULL, NULL, %s)
+"""
+
+def process_volume_vendas_funcionario(row):
+    total_quantidade = row[2]
+    total_valor = row[3]
+    cod_funcionario = row[0]
+
+    return (total_quantidade, total_valor, cod_funcionario)
+
+transfer_data(cursor_pg, cursor_pg, select_volume_vendas_funcionario,
+              insert_volume_vendas_funcionario, process_volume_vendas_funcionario)
+
+
+# ETL para tb011_vendas -> 4. Quantidade de atendimentos realizados por localidade permitindo uma visão hierárquica ao longo do tempo.
+select_atendimentos_por_localidade = """
+SELECT
+    v.tb011_cod_filial,
+    v.tb011_cod_tempo,
+    COUNT(*) AS quantidade_atendimentos
+FROM public.tb011_vendas v
+GROUP BY v.tb011_cod_filial, v.tb011_cod_tempo
+"""
+
+insert_atendimentos_por_localidade = """
+INSERT INTO public.tb011_vendas (
+    tb011_quantidade,
+    tb011_valor,
+    tb011_cod_produto,
+    tb011_cod_filial,
+    tb011_cod_tempo,
+    tb011_cod_cliente,
+    tb011_cod_funcionario
+)
+VALUES (%s, 0, NULL, %s, %s, NULL, NULL)  -- Altere NULL para 0 para tb011_valor
+"""
+
+def process_atendimentos_por_localidade(row):
+    quantidade_atendimentos = row[2]
+    cod_filial = row[0]
+    tempo_id = row[1]
+
+    return (quantidade_atendimentos, cod_filial, tempo_id)
+
+transfer_data(cursor_pg, cursor_pg, select_atendimentos_por_localidade,
+              insert_atendimentos_por_localidade, process_atendimentos_por_localidade)
+
+
+# ETL para tb011_vendas -> 5. Valor das últimas compras realizadas por cliente e tempo decorrido até a data atual.
+select_ultimas_compras = """
+SELECT
+    v.tb011_cod_cliente,
+    MAX(v.tb011_cod_tempo) AS ultima_compra,
+    SUM(v.tb011_valor) AS valor_total
+FROM public.tb011_vendas v
+GROUP BY v.tb011_cod_cliente
+"""
+
+insert_ultimas_compras = """
+INSERT INTO public.tb011_vendas (
+    tb011_quantidade,
+    tb011_valor,
+    tb011_cod_produto,
+    tb011_cod_filial,
+    tb011_cod_tempo,
+    tb011_cod_cliente,
+    tb011_cod_funcionario
+)
+VALUES (0, %s, NULL, NULL, NULL, %s, NULL)  -- Altere NULL para 0 para tb011_quantidade
+"""
+
+def process_ultimas_compras(row):
+    valor_total = row[2]
+    cpf_cliente = row[0]
+
+    return (valor_total, cpf_cliente)
+
+transfer_data(cursor_pg, cursor_pg, select_ultimas_compras,
+              insert_ultimas_compras, process_ultimas_compras)
+
+
 
 # Confirma as inserções e fecha conexões
 pg_conn.commit()
