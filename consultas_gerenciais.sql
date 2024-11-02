@@ -8,19 +8,18 @@ FROM public.tb011_vendas v
 JOIN public.tb003_produtos p ON v.tb011_cod_produto = p.tb003_cod_produto
 GROUP BY p.tb003_cod_tipo, p.tb003_cod_categoria;
 --2. Clientes que mais compraram na loja virtual com valor acumulado por período.
-SELECT 
+SELECT DISTINCT 
     c.tb009_cpf,
     c.tb009_nome_cliente,
-    SUM(v.tb011_quantidade) AS total_quantidade_produtos,  
-    SUM(v.tb011_valor) AS total_comprado_valor            
+    SUM(v.tb011_quantidade) OVER (PARTITION BY c.tb009_cpf) AS total_quantidade_produtos,  
+    SUM(v.tb011_valor) OVER (PARTITION BY c.tb009_cpf) AS total_comprado_valor            
 FROM 
     tb011_vendas v
 JOIN 
     tb009_cliente c ON v.tb011_cod_cliente = c.tb009_cpf
-GROUP BY 
-    c.tb009_cpf, c.tb009_nome_cliente                
 ORDER BY
-    total_comprado_valor DESC;                              
+    total_comprado_valor DESC;
+                         
 -- ou 
 SELECT 
     c.tb009_nome_cliente,
@@ -40,19 +39,12 @@ ORDER BY
 
 --3. Volume das vendas por funcionário e localidade.
 SELECT
-    f.tb010_nome_funcionario AS funcionario,
-    l.tb004_endereco AS localidade,
-    SUM(v.tb011_valor * v.tb011_quantidade) OVER (
-        PARTITION BY f.tb010_nome_funcionario, l.tb004_endereco
-    ) AS total_vendas
-FROM
-    tb011_vendas v
-LEFT JOIN
-    tb010_funcionario f ON v.tb011_cod_funcionario = f.tb010_cod_funcionario
-LEFT JOIN
-    tb004_filial l ON v.tb011_cod_filial = l.tb004_cod_filial
-ORDER BY
-    total_vendas DESC;
+    v.tb011_cod_filial,
+    v.tb011_cod_tempo,
+    COUNT(*) AS quantidade_atendimentos
+FROM public.tb011_vendas v
+WHERE v.tb011_cod_filial IS NOT NULL AND v.tb011_cod_tempo IS NOT NULL
+GROUP BY v.tb011_cod_filial, v.tb011_cod_tempo;
 --4. Quantidade de atendimentos realizados por localidade permitindo uma visão hierárquica ao longo do tempo.
 SELECT
     l.tb004_endereco AS localidade,

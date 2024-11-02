@@ -243,8 +243,6 @@ VALUES (%s, %s, NULL, NULL, NULL, NULL, NULL)
 """
 
 def process_vendas_agrupadas(row):
-    tipo_id = row[0]  
-    categoria_id = row[1]  
     total_quantidade = row[2]
     total_valor = row[3]
 
@@ -253,8 +251,6 @@ def process_vendas_agrupadas(row):
 
 transfer_data(cursor_pg, cursor_pg, select_vendas_agrupadas,
               insert_vendas_agrupadas, process_vendas_agrupadas)
-
-
 
 #ETL para tb011_vendas -> 2. Clientes que mais compraram na loja virtual com valor acumulado por período.
 select_clientes_mais_compraram = """
