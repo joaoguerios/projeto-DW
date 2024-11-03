@@ -13,7 +13,7 @@ def definir_tipo(categoria):
     elif categoria in [6, 7, 8]:
         return 3
     else:
-        return None  # ou outro valor padrão
+        return None 
 
 
 def transfer_data(sql_cursor, pg_cursor, select_query, insert_query, process_row=None):
@@ -39,23 +39,20 @@ cursor_sql = sql_conn.cursor()
 # Conexão com PostgreSQL
 pg_conn = psycopg2.connect(
     host="localhost",
-    database="projetoDw",
+    database="projetoDW",
     user="postgres",
-    password="#"
+    password="jpgabi12"
 )
 cursor_pg = pg_conn.cursor()
 
 # ETL para tb007_tempo (Dimensão Tempo) - Gerando datas
-
 insert_tempo = """
 INSERT INTO public.tb007_tempo (tb007_tempo_cod, tb007_tempo_data, tb007_tempo_dia, tb007_tempo_mes, tb007_tempo_ano)
 VALUES (%s, %s, %s, %s, %s)
 """
-
 start_date = datetime(2023, 1, 1)
 end_date = datetime(2024, 12, 31)
 delta = timedelta(days=1)
-
 current_date = start_date
 while current_date <= end_date:
     tempo_cod = int(current_date.strftime('%Y%m%d'))
@@ -115,16 +112,12 @@ insert_filial = """
 INSERT INTO public.tb004_filial (tb004_cod_filial, tb004_inscricao_estadual, tb004_endereco, tb004_cnpj_filial)
 VALUES (%s, %s, %s, %s)
 """
-
-
 def process_filial_row(row):
     cod_filial = row[0]
     inscricao_estadual = row[1]
     endereco_completo = row[2]
     cnpj_filial = row[3]
     return (cod_filial, inscricao_estadual, endereco_completo, cnpj_filial)
-
-
 transfer_data(cursor_sql, cursor_pg, select_filial,
               insert_filial, process_filial_row)
 
@@ -149,6 +142,7 @@ VALUES (%s, %s)
 """
 transfer_data(cursor_sql, cursor_pg, select_clientes, insert_clientes)
 
+#ETL fucionarios
 select_funcionarios = """
 SELECT 
     f.tb005_matricula, 
@@ -160,75 +154,25 @@ insert_funcionarios = """
 INSERT INTO public.tb010_funcionario (tb010_cod_funcionario, tb010_nome_funcionario, tb010_cpf)
 VALUES (%s, %s, %s)
 """
-
-
 def process_funcionario_row(row):
     cod_funcionario = row[0]
     nome_funcionario = row[1]
     cpf = row[2]
     return (cod_funcionario, nome_funcionario, cpf)
-
-
 transfer_data(cursor_sql, cursor_pg, select_funcionarios,
               insert_funcionarios, process_funcionario_row)
-
-#inserindo na fato vendas
-select_vendas = """
-SELECT
-    v.tb010_012_quantidade,
-    v.tb010_012_valor_unitario,
-    v.tb012_cod_produto,
-    f.tb004_cod_loja,
-    v.tb010_012_data,
-    v.tb010_cpf,
-    v.tb005_matricula
-FROM ADS.dbo.tb010_012_vendas v
-JOIN ADS.dbo.tb005_funcionarios f ON v.tb005_matricula = f.tb005_matricula
-"""
-
-insert_vendas = """
-INSERT INTO public.tb011_vendas (
-    tb011_quantidade,
-    tb011_valor,
-    tb011_cod_produto,
-    tb011_cod_filial,
-    tb011_cod_tempo,
-    tb011_cod_cliente,
-    tb011_cod_funcionario
-)
-VALUES (%s, %s, %s, %s, %s, %s, %s)
-"""
-
-def process_venda_row(row):
-    quantidade = row[0]
-    valor = row[1]
-    cod_produto = row[2]
-    cod_filial = row[3]
-    data_venda = row[4]
-    cpf_cliente = row[5]
-    cod_funcionario = row[6]
-
-    if isinstance(data_venda, datetime):
-        data_venda = data_venda.date()
-    tempo_cod_venda = int(data_venda.strftime('%Y%m%d'))  # Formato YYYYMMDD
-
-    return (quantidade, valor, cod_produto, cod_filial, tempo_cod_venda,cpf_cliente,cod_funcionario)
-
-transfer_data(cursor_sql, cursor_pg, select_vendas,
-              insert_vendas, process_venda_row)
 
 # ETL para tb011_vendas -> 1. Valor das vendas agrupada por produto, tipo e categoria.
 select_vendas_agrupadas = """
 SELECT
-    p.tb003_cod_tipo AS tipo_id, 
-    p.tb003_cod_categoria AS categoria_id,
-    SUM(v.tb011_quantidade) AS total_quantidade,
-    SUM(v.tb011_valor) AS total_valor
-FROM public.tb011_vendas v
-JOIN public.tb003_produtos p ON v.tb011_cod_produto = p.tb003_cod_produto
-GROUP BY p.tb003_cod_tipo, p.tb003_cod_categoria
+    v.tb012_cod_produto AS produto,
+    SUM(v.tb010_012_quantidade) AS total_quantidade,
+    SUM(v.tb010_012_valor_unitario * v.tb010_012_quantidade) AS total_valor
+FROM ADS.dbo.tb010_012_vendas v
+INNER JOIN ADS.dbo.tb012_produtos p ON p.tb012_cod_produto= v.tb012_cod_produto
+GROUP BY v.tb012_cod_produto, p.tb013_cod_categoria
+ORDER BY p.tb013_cod_categoria;
 """
-
 insert_vendas_agrupadas = """
 INSERT INTO public.tb011_vendas (
     tb011_quantidade,
@@ -239,29 +183,25 @@ INSERT INTO public.tb011_vendas (
     tb011_cod_cliente,
     tb011_cod_funcionario
 )
-VALUES (%s, %s, NULL, NULL, NULL, NULL, NULL)  
+VALUES (%s, %s, %s, NULL, NULL, NULL, NULL)  
 """
-
 def process_vendas_agrupadas(row):
-    total_quantidade = row[2]
-    total_valor = row[3]
-
-    return (total_quantidade, total_valor) 
-
-
-transfer_data(cursor_pg, cursor_pg, select_vendas_agrupadas,
+    total_quantidade = row[1]
+    total_valor = row[2]
+    produto = row[0]
+    return (total_quantidade, total_valor, produto) 
+transfer_data(cursor_sql, cursor_pg, select_vendas_agrupadas,
               insert_vendas_agrupadas, process_vendas_agrupadas)
 
 #ETL para tb011_vendas -> 2. Clientes que mais compraram na loja virtual com valor acumulado por período.
 select_clientes_mais_compraram = """
 SELECT
-    v.tb011_cod_cliente,  -- Ajustar para a coluna correta
-    SUM(v.tb011_valor) AS total_valor
-FROM public.tb011_vendas v
-GROUP BY v.tb011_cod_cliente
-ORDER BY total_valor DESC
+    v.tb010_cpf AS tb011_cod_cliente, 
+    SUM(v.tb010_012_valor_unitario * v.tb010_012_quantidade) AS total_valor
+FROM ADS.dbo.tb010_012_vendas v
+GROUP BY v.tb010_cpf
+ORDER BY total_valor DESC;
 """
-
 insert_clientes_mais_compraram = """
 INSERT INTO public.tb011_vendas (
     tb011_quantidade,
@@ -272,31 +212,30 @@ INSERT INTO public.tb011_vendas (
     tb011_cod_cliente,
     tb011_cod_funcionario
 )
-VALUES (0, %s, NULL, NULL, NULL, %s, NULL)  -- Altere NULL para 0 para tb011_quantidade
+VALUES (NULL, %s, NULL, NULL, NULL, %s, NULL)  -- Altere NULL para 0 para tb011_quantidade
 """
-
 def process_clientes_mais_compraram(row):
     total_valor = row[1]
     cpf_cliente = row[0]
 
     return (total_valor, cpf_cliente)
-
-transfer_data(cursor_pg, cursor_pg, select_clientes_mais_compraram,
+transfer_data(cursor_sql, cursor_pg, select_clientes_mais_compraram,
               insert_clientes_mais_compraram, process_clientes_mais_compraram)
-
 
 # ETL para tb011_vendas -> 3. Volume das vendas por funcionário e localidade.
 select_volume_vendas_funcionario = """
 SELECT
-    f.tb010_cod_funcionario,
-    v.tb011_cod_filial, 
-    SUM(v.tb011_quantidade) AS total_quantidade,
-    SUM(v.tb011_valor) AS total_valor
-FROM public.tb011_vendas v
-JOIN public.tb010_funcionario f ON v.tb011_cod_funcionario = f.tb010_cod_funcionario
-GROUP BY f.tb010_cod_funcionario, v.tb011_cod_filial
+    f.tb005_matricula,
+    f.tb004_cod_loja AS tb011_cod_filial, 
+    SUM(v.tb010_012_quantidade) AS total_quantidade,
+    SUM(v.tb010_012_valor_unitario * v.tb010_012_quantidade) AS total_valor
+FROM
+    ADS.dbo.tb010_012_vendas v
+JOIN
+    ADS.dbo.tb005_funcionarios f ON v.tb005_matricula = f.tb005_matricula
+GROUP BY
+    f.tb005_matricula, f.tb004_cod_loja;
 """
-
 insert_volume_vendas_funcionario = """
 INSERT INTO public.tb011_vendas (
     tb011_quantidade,
@@ -307,30 +246,32 @@ INSERT INTO public.tb011_vendas (
     tb011_cod_cliente,
     tb011_cod_funcionario
 )
-VALUES (%s, %s, NULL, NULL, NULL, NULL, %s)
+VALUES (%s, %s, NULL, %s, NULL, NULL, %s)
 """
-
 def process_volume_vendas_funcionario(row):
     total_quantidade = row[2]
     total_valor = row[3]
     cod_funcionario = row[0]
+    cod_filial = row[1]
 
-    return (total_quantidade, total_valor, cod_funcionario)
-
-transfer_data(cursor_pg, cursor_pg, select_volume_vendas_funcionario,
+    return (total_quantidade, total_valor, cod_filial ,cod_funcionario)
+transfer_data(cursor_sql, cursor_pg, select_volume_vendas_funcionario,
               insert_volume_vendas_funcionario, process_volume_vendas_funcionario)
-
 
 # ETL para tb011_vendas -> 4. Quantidade de atendimentos realizados por localidade permitindo uma visão hierárquica ao longo do tempo.
 select_atendimentos_por_localidade = """
 SELECT
-    v.tb011_cod_filial,
-    v.tb011_cod_tempo,
+    f.tb004_cod_loja AS tb011_cod_filial,
+    v.tb010_012_data AS tb011_cod_tempo,
     COUNT(*) AS quantidade_atendimentos
-FROM public.tb011_vendas v
-GROUP BY v.tb011_cod_filial, v.tb011_cod_tempo
-"""
+FROM
+    ADS.dbo.tb010_012_vendas v
+JOIN
+    ADS.dbo.tb005_funcionarios f ON v.tb005_matricula = f.tb005_matricula
+GROUP BY
+    f.tb004_cod_loja, v.tb010_012_data;
 
+"""
 insert_atendimentos_por_localidade = """
 INSERT INTO public.tb011_vendas (
     tb011_quantidade,
@@ -341,30 +282,37 @@ INSERT INTO public.tb011_vendas (
     tb011_cod_cliente,
     tb011_cod_funcionario
 )
-VALUES (%s, 0, NULL, %s, %s, NULL, NULL)  -- Altere NULL para 0 para tb011_valor
+VALUES (%s, null, NULL, %s, (SELECT tb007_tempo_cod FROM public.tb007_tempo WHERE tb007_tempo_data = %s), NULL, NULL)  
 """
-
 def process_atendimentos_por_localidade(row):
     quantidade_atendimentos = row[2]
     cod_filial = row[0]
     tempo_id = row[1]
 
     return (quantidade_atendimentos, cod_filial, tempo_id)
-
-transfer_data(cursor_pg, cursor_pg, select_atendimentos_por_localidade,
+transfer_data(cursor_sql, cursor_pg, select_atendimentos_por_localidade,
               insert_atendimentos_por_localidade, process_atendimentos_por_localidade)
-
 
 # ETL para tb011_vendas -> 5. Valor das últimas compras realizadas por cliente e tempo decorrido até a data atual.
 select_ultimas_compras = """
-SELECT
-    v.tb011_cod_cliente,
-    MAX(v.tb011_cod_tempo) AS ultima_compra,
-    SUM(v.tb011_valor) AS valor_total
-FROM public.tb011_vendas v
-GROUP BY v.tb011_cod_cliente
+SELECT 
+    v.tb010_cpf AS cliente_cpf,
+    v.tb012_cod_produto AS produto,
+    v.tb010_012_valor_unitario * v.tb010_012_quantidade AS valor_ultima_compra,
+    v.tb010_012_data AS data_ultima_compra,
+    DATEDIFF(DAY, v.tb010_012_data, GETDATE()) AS dias_desde_ultima_compra
+FROM ADS.dbo.tb010_012_vendas v
+INNER JOIN (
+    -- Subconsulta para encontrar a data da última compra de cada cliente
+    SELECT 
+        tb010_cpf,
+        MAX(tb010_012_data) AS ultima_compra
+    FROM ADS.dbo.tb010_012_vendas
+    GROUP BY tb010_cpf
+) AS ultimas_compras ON v.tb010_cpf = ultimas_compras.tb010_cpf
+AND v.tb010_012_data = ultimas_compras.ultima_compra
+ORDER BY v.tb010_cpf;
 """
-
 insert_ultimas_compras = """
 INSERT INTO public.tb011_vendas (
     tb011_quantidade,
@@ -375,19 +323,16 @@ INSERT INTO public.tb011_vendas (
     tb011_cod_cliente,
     tb011_cod_funcionario
 )
-VALUES (0, %s, NULL, NULL, NULL, %s, NULL)  -- Altere NULL para 0 para tb011_quantidade
+VALUES (NULL, %s, NULL, NULL, (SELECT tb007_tempo_cod FROM public.tb007_tempo WHERE tb007_tempo_data = %s), %s, NULL)  
 """
-
 def process_ultimas_compras(row):
+    data_ultima_compra = row[3]
     valor_total = row[2]
     cpf_cliente = row[0]
 
-    return (valor_total, cpf_cliente)
-
-transfer_data(cursor_pg, cursor_pg, select_ultimas_compras,
+    return (valor_total, data_ultima_compra, cpf_cliente )
+transfer_data(cursor_sql, cursor_pg, select_ultimas_compras,
               insert_ultimas_compras, process_ultimas_compras)
-
-
 
 # Confirma as inserções e fecha conexões
 pg_conn.commit()

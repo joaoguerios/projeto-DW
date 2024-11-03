@@ -48,8 +48,8 @@ CREATE TABLE tb010_funcionario (
 );
 
 CREATE TABLE tb011_vendas (
-    tb011_quantidade INT NOT NULL,
-    tb011_valor NUMERIC(10, 2) NOT NULL,
+    tb011_quantidade INT,
+    tb011_valor NUMERIC(10, 2),
     tb011_cod_produto INT REFERENCES tb003_produtos(tb003_cod_produto),
     tb011_cod_filial INT REFERENCES tb004_filial(tb004_cod_filial),
     tb011_cod_tempo INT REFERENCES tb007_tempo(tb007_tempo_cod),
