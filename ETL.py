@@ -41,7 +41,7 @@ pg_conn = psycopg2.connect(
     host="localhost",
     database="projetoDW",
     user="postgres",
-    password="jpgabi12"
+    password="#"
 )
 cursor_pg = pg_conn.cursor()
 
